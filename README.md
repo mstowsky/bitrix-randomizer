@@ -8,7 +8,7 @@
 
 ## Запуск
 
-Требуется Python 3.12+.
+Требуется Python 3.14+.
 
 ```bash
 python -m venv .venv
