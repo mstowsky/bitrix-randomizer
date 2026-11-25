@@ -76,6 +76,30 @@ class PortalService:
         """Get a portal by its Bitrix24 member identifier."""
         return self.repository.get_by_member_id(member_id)
 
+    async def get_valid_access_token(self, portal_id: UUID) -> str:
+        """Return a valid access token, refreshing it when it is close to expiration."""
+        portal = self.repository.get_by_id(portal_id)
+
+        if portal is None:
+            raise ValueError("Portal not found.")
+
+        if not portal.access_token_encrypted:
+            raise ValueError("Portal has no stored access token.")
+
+        # Refresh the token 60 seconds before expiration to avoid race conditions.
+        refresh_threshold = datetime.now(UTC) + timedelta(seconds=60)
+
+        if (
+            portal.access_token_expires_at is None
+            or portal.access_token_expires_at <= refresh_threshold
+        ):
+            portal = await self.refresh_portal_tokens(portal_id)
+
+        if not portal.access_token_encrypted:
+            raise ValueError("Portal has no stored access token.")
+
+        return decrypt_token(portal.access_token_encrypted)
+
     async def refresh_portal_tokens(self, portal_id: UUID) -> Portal:
         """Refresh and persist OAuth tokens for a connected portal."""
         portal = self.repository.get_by_id(portal_id)

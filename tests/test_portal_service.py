@@ -1,6 +1,6 @@
 """Tests for the portal service."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -279,3 +279,141 @@ async def test_refresh_portal_tokens_rejects_different_member_id(
 
     repository.update.assert_not_called()
     db.commit.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_get_valid_access_token_returns_existing_token(
+    service: PortalService,
+    repository: MagicMock,
+) -> None:
+    """A valid access token is returned without refreshing it."""
+    portal_id = uuid4()
+    portal = Portal(
+        domain="example.bitrix24.ru",
+        member_id="member-123",
+        access_token_encrypted="encrypted:access-123",
+        access_token_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+    )
+    repository.get_by_id.return_value = portal
+
+    with (
+        patch(
+            "app.services.portal_service.decrypt_token",
+            return_value="access-123",
+        ) as decrypt,
+        patch.object(
+            service,
+            "refresh_portal_tokens",
+            new_callable=AsyncMock,
+        ) as refresh,
+    ):
+        result = await service.get_valid_access_token(portal_id)
+
+    assert result == "access-123"
+    decrypt.assert_called_once_with("encrypted:access-123")
+    refresh.assert_not_awaited()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "expires_at",
+    [
+        datetime.now(UTC) - timedelta(minutes=1),
+        datetime.now(UTC) + timedelta(seconds=30),
+    ],
+)
+async def test_get_valid_access_token_refreshes_expiring_token(
+    service: PortalService,
+    repository: MagicMock,
+    expires_at: datetime,
+) -> None:
+    """An expired or nearly expired token is refreshed."""
+    portal_id = uuid4()
+    portal = Portal(
+        domain="example.bitrix24.ru",
+        member_id="member-123",
+        access_token_encrypted="encrypted:old-access",
+        access_token_expires_at=expires_at,
+    )
+    repository.get_by_id.return_value = portal
+
+    with (
+        patch(
+            "app.services.portal_service.decrypt_token",
+            return_value="new-access",
+        ) as decrypt,
+        patch.object(
+            service,
+            "refresh_portal_tokens",
+            new_callable=AsyncMock,
+            return_value=portal,
+        ) as refresh,
+    ):
+        result = await service.get_valid_access_token(portal_id)
+
+    assert result == "new-access"
+    refresh.assert_awaited_once_with(portal_id)
+    decrypt.assert_called_once_with("encrypted:old-access")
+
+
+@pytest.mark.anyio
+async def test_get_valid_access_token_refreshes_when_expiration_is_unknown(
+    service: PortalService,
+    repository: MagicMock,
+) -> None:
+    """A token without a known expiration is refreshed."""
+    portal_id = uuid4()
+    portal = Portal(
+        domain="example.bitrix24.ru",
+        member_id="member-123",
+        access_token_encrypted="encrypted:old-access",
+        access_token_expires_at=None,
+    )
+    repository.get_by_id.return_value = portal
+
+    with (
+        patch(
+            "app.services.portal_service.decrypt_token",
+            return_value="new-access",
+        ) as decrypt,
+        patch.object(
+            service,
+            "refresh_portal_tokens",
+            new_callable=AsyncMock,
+            return_value=portal,
+        ) as refresh,
+    ):
+        result = await service.get_valid_access_token(portal_id)
+
+    assert result == "new-access"
+    refresh.assert_awaited_once_with(portal_id)
+    decrypt.assert_called_once_with("encrypted:old-access")
+
+
+@pytest.mark.anyio
+async def test_get_valid_access_token_rejects_unknown_portal(
+    service: PortalService,
+    repository: MagicMock,
+) -> None:
+    """An unknown portal cannot provide an access token."""
+    repository.get_by_id.return_value = None
+
+    with pytest.raises(ValueError, match="Portal not found"):
+        await service.get_valid_access_token(uuid4())
+
+
+@pytest.mark.anyio
+async def test_get_valid_access_token_rejects_missing_access_token(
+    service: PortalService,
+    repository: MagicMock,
+) -> None:
+    """A portal without a stored access token is rejected."""
+    portal = Portal(
+        domain="example.bitrix24.ru",
+        member_id="member-123",
+        access_token_encrypted=None,
+    )
+    repository.get_by_id.return_value = portal
+
+    with pytest.raises(ValueError, match="no stored access token"):
+        await service.get_valid_access_token(uuid4())
