@@ -8,7 +8,17 @@ from sqlalchemy.orm import Session
 from app.core.security import decrypt_token, encrypt_token
 from app.database.models import Portal
 from app.database.repositories.portal_repository import PortalRepository
-from app.integrations.bitrix24.oauth import Bitrix24OAuthClient
+from app.integrations.bitrix24.oauth import (
+    Bitrix24OAuthClient,
+    Bitrix24OAuthError,
+)
+
+
+class PortalReauthorizationRequired(Exception):
+    """Raised when a portal needs to be authorized again."""
+
+    def __init__(self) -> None:
+        super().__init__("The Bitrix24 portal needs to be authorized again.")
 
 
 class PortalService:
@@ -114,7 +124,13 @@ class PortalService:
         refresh_token = decrypt_token(portal.refresh_token_encrypted)
 
         oauth_client = Bitrix24OAuthClient()
-        token_data = await oauth_client.refresh_token(refresh_token)
+
+        try:
+            token_data = await oauth_client.refresh_token(refresh_token)
+        except Bitrix24OAuthError as exc:
+            if exc.error == "invalid_grant":
+                raise PortalReauthorizationRequired from exc
+            raise
 
         # Ensure that the refreshed credentials belong to the requested portal.
         if token_data.member_id != portal.member_id:

@@ -95,7 +95,7 @@ async def test_refresh_token_sends_correct_request(
             "refresh_token": "old-refresh-token",
         },
     )
-    response.raise_for_status.assert_called_once()
+    assert response.raise_for_status.call_count == 0
 
 
 @pytest.mark.anyio

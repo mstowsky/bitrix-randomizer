@@ -7,8 +7,8 @@ from uuid import uuid4
 import pytest
 
 from app.database.models import Portal
-from app.integrations.bitrix24.oauth import OAuthTokenResponse
-from app.services.portal_service import PortalService
+from app.integrations.bitrix24.oauth import Bitrix24OAuthError, OAuthTokenResponse
+from app.services.portal_service import PortalReauthorizationRequired, PortalService
 
 
 @pytest.fixture
@@ -417,3 +417,44 @@ async def test_get_valid_access_token_rejects_missing_access_token(
 
     with pytest.raises(ValueError, match="no stored access token"):
         await service.get_valid_access_token(uuid4())
+
+
+@pytest.mark.anyio
+async def test_refresh_portal_tokens_requires_reauthorization(
+    service: PortalService,
+    db: MagicMock,
+    repository: MagicMock,
+) -> None:
+    """An invalid refresh token requires portal reauthorization."""
+    portal = Portal(
+        domain="example.bitrix24.ru",
+        member_id="member-123",
+        refresh_token_encrypted="encrypted:old-refresh",
+    )
+    repository.get_by_id.return_value = portal
+
+    oauth_client = MagicMock()
+    oauth_client.refresh_token = AsyncMock(
+        side_effect=Bitrix24OAuthError(
+            error="invalid_grant",
+            description="Refresh token expired",
+        )
+    )
+
+    with (
+        patch(
+            "app.services.portal_service.decrypt_token",
+            return_value="old-refresh",
+        ),
+        patch(
+            "app.services.portal_service.Bitrix24OAuthClient",
+            return_value=oauth_client,
+        ),
+        pytest.raises(PortalReauthorizationRequired),
+    ):
+        await service.refresh_portal_tokens(uuid4())
+
+    oauth_client.refresh_token.assert_awaited_once_with("old-refresh")
+    repository.update.assert_not_called()
+    db.commit.assert_not_called()
+    db.rollback.assert_not_called()
