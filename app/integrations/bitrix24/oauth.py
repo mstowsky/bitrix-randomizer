@@ -8,6 +8,15 @@ from app.core.config import settings
 OAUTH_TOKEN_URL = "https://oauth.bitrix24.tech/oauth/token/"
 
 
+class Bitrix24OAuthError(Exception):
+    """Error returned by the Bitrix24 OAuth authorization server."""
+
+    def __init__(self, error: str, description: str) -> None:
+        self.error = error
+        self.description = description
+        super().__init__(f"Bitrix24 OAuth error: {error}")
+
+
 class OAuthTokenResponse(BaseModel):
     """Token response returned by the Bitrix24 OAuth server."""
 
@@ -49,6 +58,19 @@ class Bitrix24OAuthClient:
 
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.get(OAUTH_TOKEN_URL, params=params)
-            response.raise_for_status()
 
-        return OAuthTokenResponse.model_validate(response.json())
+            if not response.is_success:
+                try:
+                    error_data = response.json()
+                except ValueError:
+                    error_data = {}
+
+                if isinstance(error_data, dict) and error_data.get("error"):
+                    raise Bitrix24OAuthError(
+                        error=str(error_data["error"]),
+                        description=str(error_data.get("error_description", "")),
+                    )
+
+                response.raise_for_status()
+
+            return OAuthTokenResponse.model_validate(response.json())
