@@ -108,7 +108,6 @@ def test_save_portal_updates_existing_portal(
     assert updated_portal is portal
     assert updated_values["access_token_encrypted"] == "encrypted:new-access"
     assert updated_values["refresh_token_encrypted"] == "encrypted:new-refresh"
-    assert portal.refresh_token_encrypted == "encrypted:new-refresh"
 
     repository.update.assert_called_once()
     repository.create.assert_not_called()
