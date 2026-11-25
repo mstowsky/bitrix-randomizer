@@ -189,6 +189,10 @@ async def test_refresh_token_raises_structured_oauth_error(
     assert exc_info.value.description == "Refresh token expired"
     assert "old-refresh-token" not in str(exc_info.value)
 
+    assert "Refresh token expired" not in str(exc_info.value)
+    assert "old-refresh-token" not in str(exc_info.value)
+    assert "invalid_grant" in str(exc_info.value)
+
 
 @pytest.mark.anyio
 async def test_refresh_token_raises_structured_oauth_error_on_success_status(

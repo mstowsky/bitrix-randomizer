@@ -526,3 +526,53 @@ async def test_get_valid_access_token_requires_reauthorization(
         await service.get_valid_access_token(portal_id)
 
     refresh.assert_awaited_once_with(portal_id)
+
+
+@pytest.mark.anyio
+async def test_refresh_portal_tokens_rolls_back_on_database_error(
+    service: PortalService,
+    db: MagicMock,
+    repository: MagicMock,
+) -> None:
+    """A database error during token persistence rolls back the transaction."""
+    portal = Portal(
+        domain="example.bitrix24.ru",
+        member_id="member-123",
+        refresh_token_encrypted="encrypted:old-refresh",
+    )
+    repository.get_by_id.return_value = portal
+    repository.update.side_effect = RuntimeError("Database error")
+
+    token_data = OAuthTokenResponse(
+        access_token="new-access",
+        refresh_token="new-refresh",
+        expires_in=3600,
+        member_id="member-123",
+        client_endpoint="https://example.bitrix24.ru/rest/",
+        server_endpoint="https://oauth.bitrix24.tech/rest/",
+        scope="crm",
+    )
+
+    oauth_client = MagicMock()
+    oauth_client.refresh_token = AsyncMock(return_value=token_data)
+
+    with (
+        patch(
+            "app.services.portal_service.decrypt_token",
+            return_value="old-refresh",
+        ),
+        patch(
+            "app.services.portal_service.encrypt_token",
+            side_effect=lambda token: f"encrypted:{token}",
+        ),
+        patch(
+            "app.services.portal_service.Bitrix24OAuthClient",
+            return_value=oauth_client,
+        ),
+        pytest.raises(RuntimeError, match="Database error"),
+    ):
+        await service.refresh_portal_tokens(uuid4())
+
+    repository.update.assert_called_once()
+    db.commit.assert_not_called()
+    db.rollback.assert_called_once()
