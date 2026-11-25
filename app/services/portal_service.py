@@ -118,7 +118,7 @@ class PortalService:
             raise ValueError("Portal not found.")
 
         if not portal.refresh_token_encrypted:
-            raise ValueError("Portal has no stored refresh token.")
+            raise PortalReauthorizationRequired
 
         # Decrypt the current refresh token before sending it to Bitrix24.
         refresh_token = decrypt_token(portal.refresh_token_encrypted)

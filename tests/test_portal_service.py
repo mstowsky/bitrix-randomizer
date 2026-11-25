@@ -232,7 +232,7 @@ async def test_refresh_portal_tokens_rejects_missing_refresh_token(
     )
     repository.get_by_id.return_value = portal
 
-    with pytest.raises(ValueError, match="no stored refresh token"):
+    with pytest.raises(PortalReauthorizationRequired):
         await service.refresh_portal_tokens(uuid4())
 
     db.commit.assert_not_called()
