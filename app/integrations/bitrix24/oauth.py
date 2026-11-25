@@ -59,18 +59,20 @@ class Bitrix24OAuthClient:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.get(OAUTH_TOKEN_URL, params=params)
 
+            try:
+                response_data = response.json()
+            except ValueError:
+                if not response.is_success:
+                    response.raise_for_status()
+                raise
+
+            if isinstance(response_data, dict) and response_data.get("error"):
+                raise Bitrix24OAuthError(
+                    error=str(response_data["error"]),
+                    description=str(response_data.get("error_description", "")),
+                )
+
             if not response.is_success:
-                try:
-                    error_data = response.json()
-                except ValueError:
-                    error_data = {}
-
-                if isinstance(error_data, dict) and error_data.get("error"):
-                    raise Bitrix24OAuthError(
-                        error=str(error_data["error"]),
-                        description=str(error_data.get("error_description", "")),
-                    )
-
                 response.raise_for_status()
 
-            return OAuthTokenResponse.model_validate(response.json())
+            return OAuthTokenResponse.model_validate(response_data)

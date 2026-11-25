@@ -188,3 +188,36 @@ async def test_refresh_token_raises_structured_oauth_error(
     assert exc_info.value.error == "invalid_grant"
     assert exc_info.value.description == "Refresh token expired"
     assert "old-refresh-token" not in str(exc_info.value)
+
+
+@pytest.mark.anyio
+async def test_refresh_token_raises_structured_oauth_error_on_success_status(
+    oauth_credentials: None,
+) -> None:
+    """A structured OAuth error is recognized even with a success HTTP status."""
+    response = MagicMock()
+    response.is_success = True
+    response.json.return_value = {
+        "error": "invalid_grant",
+        "error_description": "Refresh token expired",
+    }
+
+    http_client = AsyncMock()
+    http_client.get.return_value = response
+
+    async_client = MagicMock()
+    async_client.__aenter__ = AsyncMock(return_value=http_client)
+    async_client.__aexit__ = AsyncMock(return_value=None)
+
+    with (
+        patch(
+            "app.integrations.bitrix24.oauth.httpx.AsyncClient",
+            return_value=async_client,
+        ),
+        pytest.raises(Bitrix24OAuthError) as exc_info,
+    ):
+        client = Bitrix24OAuthClient()
+        await client.refresh_token("old-refresh-token")
+
+    assert exc_info.value.error == "invalid_grant"
+    assert exc_info.value.description == "Refresh token expired"

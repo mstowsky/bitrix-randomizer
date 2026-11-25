@@ -458,3 +458,71 @@ async def test_refresh_portal_tokens_requires_reauthorization(
     repository.update.assert_not_called()
     db.commit.assert_not_called()
     db.rollback.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_refresh_portal_tokens_propagates_other_oauth_errors(
+    service: PortalService,
+    repository: MagicMock,
+) -> None:
+    """OAuth errors other than invalid_grant are propagated unchanged."""
+    portal = Portal(
+        domain="example.bitrix24.ru",
+        member_id="member-123",
+        refresh_token_encrypted="encrypted:old-refresh",
+    )
+    repository.get_by_id.return_value = portal
+
+    oauth_error = Bitrix24OAuthError(
+        error="invalid_client",
+        description="Client authentication failed",
+    )
+
+    oauth_client = MagicMock()
+    oauth_client.refresh_token = AsyncMock(side_effect=oauth_error)
+
+    with (
+        patch(
+            "app.services.portal_service.decrypt_token",
+            return_value="old-refresh",
+        ),
+        patch(
+            "app.services.portal_service.Bitrix24OAuthClient",
+            return_value=oauth_client,
+        ),
+        pytest.raises(Bitrix24OAuthError) as exc_info,
+    ):
+        await service.refresh_portal_tokens(uuid4())
+
+    assert exc_info.value is oauth_error
+    assert exc_info.value.error == "invalid_client"
+    repository.update.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_get_valid_access_token_requires_reauthorization(
+    service: PortalService,
+    repository: MagicMock,
+) -> None:
+    """An invalid refresh token requires portal reauthorization."""
+    portal_id = uuid4()
+    portal = Portal(
+        domain="example.bitrix24.ru",
+        member_id="member-123",
+        access_token_encrypted="encrypted:old-access",
+        access_token_expires_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+    repository.get_by_id.return_value = portal
+
+    with (
+        patch.object(
+            service,
+            "refresh_portal_tokens",
+            new_callable=AsyncMock,
+            side_effect=PortalReauthorizationRequired,
+        ) as refresh,
+        pytest.raises(PortalReauthorizationRequired),
+    ):
+        await service.get_valid_access_token(portal_id)
+
+    refresh.assert_awaited_once_with(portal_id)
