@@ -50,7 +50,7 @@ jobs:
 
           cd /opt/bitrix-randomizer
           git pull --ff-only origin main
-          ./.venv/bin/python -m pip install -r requirements.txt
+          /home/bot/.local/bin/uv pip install --python .venv/bin/python -r requirements.txt
 
           sudo -n systemctl restart bitrix-randomizer.service
 
