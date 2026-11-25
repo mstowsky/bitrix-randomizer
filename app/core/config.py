@@ -18,9 +18,7 @@ class Settings(BaseSettings):
     client_id: str = ""
     client_secret: str = ""
 
-    database_url: str = (
-        "postgresql+psycopg://postgres:postgres@localhost:5432/bitrix_randomizer"
-    )
+    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/bitrix_randomizer"
 
 
 settings = Settings()
