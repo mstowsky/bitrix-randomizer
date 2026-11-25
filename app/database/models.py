@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Uuid, func
+from sqlalchemy import DateTime, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -28,11 +28,53 @@ class Portal(Base):
         nullable=False,
     )
 
-    # Unique Bitrix24 portal identifier from OAuth context.
+    # Unique Bitrix24 portal identifier.
     member_id: Mapped[str] = mapped_column(
         String(255),
         unique=True,
         nullable=False,
+    )
+
+    # Encrypted OAuth access token.
+    access_token_encrypted: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    # Encrypted OAuth refresh token.
+    refresh_token_encrypted: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    # Access token expiration timestamp.
+    access_token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Portal REST API endpoint.
+    client_endpoint: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
+    # Bitrix24 OAuth server endpoint.
+    server_endpoint: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
+    # Granted REST API scopes.
+    scope: Mapped[str | None] = mapped_column(
+        String(1000),
+        nullable=True,
+    )
+
+    # Encrypted application token for event verification.
+    application_token_encrypted: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
     )
 
     # Portal registration timestamp.
