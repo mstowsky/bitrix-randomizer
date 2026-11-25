@@ -1,7 +1,7 @@
 """Tests for the portal service."""
 
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -9,6 +9,12 @@ import pytest
 from app.database.models import Portal
 from app.integrations.bitrix24.oauth import OAuthTokenResponse
 from app.services.portal_service import PortalService
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Use asyncio as the backend for async tests."""
+    return "asyncio"
 
 
 @pytest.fixture
@@ -94,7 +100,14 @@ def test_save_portal_updates_existing_portal(
         )
 
     assert result is portal
-    assert portal.access_token_encrypted == "encrypted:new-access"
+    repository.update.assert_called_once()
+
+    updated_portal = repository.update.call_args.args[0]
+    updated_values = repository.update.call_args.kwargs
+
+    assert updated_portal is portal
+    assert updated_values["access_token_encrypted"] == "encrypted:new-access"
+    assert updated_values["refresh_token_encrypted"] == "encrypted:new-refresh"
     assert portal.refresh_token_encrypted == "encrypted:new-refresh"
 
     repository.update.assert_called_once()
@@ -128,7 +141,7 @@ def test_save_portal_rejects_domain_owned_by_another_portal(
     db.commit.assert_not_called()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_refresh_portal_tokens_saves_new_tokens(
     service: PortalService,
     db: MagicMock,
@@ -154,7 +167,7 @@ async def test_refresh_portal_tokens_saves_new_tokens(
     )
 
     oauth_client = MagicMock()
-    oauth_client.refresh_token.return_value = token_data
+    oauth_client.refresh_token = AsyncMock(return_value=token_data)
 
     with (
         patch(
@@ -192,7 +205,7 @@ async def test_refresh_portal_tokens_saves_new_tokens(
     db.commit.assert_called_once()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_refresh_portal_tokens_rejects_unknown_portal(
     service: PortalService,
     db: MagicMock,
@@ -207,7 +220,7 @@ async def test_refresh_portal_tokens_rejects_unknown_portal(
     db.commit.assert_not_called()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_refresh_portal_tokens_rejects_missing_refresh_token(
     service: PortalService,
     db: MagicMock,
@@ -226,7 +239,7 @@ async def test_refresh_portal_tokens_rejects_missing_refresh_token(
     db.commit.assert_not_called()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_refresh_portal_tokens_rejects_different_member_id(
     service: PortalService,
     db: MagicMock,
@@ -250,7 +263,7 @@ async def test_refresh_portal_tokens_rejects_different_member_id(
     )
 
     oauth_client = MagicMock()
-    oauth_client.refresh_token.return_value = token_data
+    oauth_client.refresh_token = AsyncMock(return_value=token_data)
 
     with (
         patch(
