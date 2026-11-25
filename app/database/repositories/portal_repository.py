@@ -1,5 +1,7 @@
 """Repository for Bitrix24 portal database operations."""
 
+from uuid import UUID
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,7 +15,7 @@ class PortalRepository:
         """Initialize the repository with a database session."""
         self.db = db
 
-    def get_by_id(self, portal_id: str) -> Portal | None:
+    def get_by_id(self, portal_id: UUID) -> Portal | None:
         """Get a portal by its internal ID."""
         return self.db.get(Portal, portal_id)
 

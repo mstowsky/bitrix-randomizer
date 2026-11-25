@@ -70,7 +70,7 @@ class PortalService:
 
     def get_by_id(self, portal_id: UUID) -> Portal | None:
         """Get a portal by its internal identifier."""
-        return self.db.get(Portal, portal_id)
+        return self.repository.get_by_id(portal_id)
 
     def get_by_member_id(self, member_id: str) -> Portal | None:
         """Get a portal by its Bitrix24 member identifier."""
@@ -78,7 +78,7 @@ class PortalService:
 
     async def refresh_portal_tokens(self, portal_id: UUID) -> Portal:
         """Refresh and persist OAuth tokens for a connected portal."""
-        portal = self.repository.get_by_id(str(portal_id))
+        portal = self.repository.get_by_id(portal_id)
 
         if portal is None:
             raise ValueError("Portal not found.")
