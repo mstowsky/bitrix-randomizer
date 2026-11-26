@@ -7,7 +7,9 @@ import pytest
 
 from app.core.config import settings
 from app.integrations.bitrix24.oauth import (
+    OAUTH_APP_INFO_URL,
     OAUTH_TOKEN_URL,
+    Bitrix24InstallationValidationError,
     Bitrix24OAuthClient,
     Bitrix24OAuthError,
     OAuthTokenResponse,
@@ -24,6 +26,14 @@ def oauth_credentials() -> None:
         yield
 
 
+def create_async_client(http_client: AsyncMock) -> MagicMock:
+    """Create a mocked asynchronous HTTP client context manager."""
+    async_client = MagicMock()
+    async_client.__aenter__ = AsyncMock(return_value=http_client)
+    async_client.__aexit__ = AsyncMock(return_value=None)
+    return async_client
+
+
 def test_oauth_client_requires_credentials() -> None:
     """The client cannot be initialized without OAuth credentials."""
     with (
@@ -32,6 +42,182 @@ def test_oauth_client_requires_credentials() -> None:
         pytest.raises(ValueError, match="credentials are not configured"),
     ):
         Bitrix24OAuthClient()
+
+
+@pytest.mark.anyio
+async def test_validate_installation_sends_correct_request(
+    oauth_credentials: None,
+) -> None:
+    """The installation token is checked on the fixed authorization server."""
+    response = MagicMock()
+    response.json.return_value = {
+        "result": {
+            "client_id": "test-client-id",
+            "install": {"member_id": "member-123"},
+        }
+    }
+
+    http_client = AsyncMock()
+    http_client.post.return_value = response
+    async_client = create_async_client(http_client)
+
+    with (
+        patch(
+            "app.integrations.bitrix24.oauth.httpx.AsyncClient",
+            return_value=async_client,
+        ) as async_client_factory,
+    ):
+        client = Bitrix24OAuthClient()
+        await client.validate_installation(
+            access_token="installation-access-token",
+            member_id="member-123",
+        )
+
+    async_client_factory.assert_called_once_with(timeout=15.0)
+    http_client.post.assert_awaited_once_with(
+        OAUTH_APP_INFO_URL,
+        data={"auth": "installation-access-token"},
+    )
+    response.raise_for_status.assert_called_once()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("response_data", "expected_message"),
+    [
+        (
+            {
+                "result": {
+                    "client_id": "another-client-id",
+                    "install": {"member_id": "member-123"},
+                }
+            },
+            "another application",
+        ),
+        (
+            {
+                "result": {
+                    "client_id": "test-client-id",
+                    "install": {"member_id": "another-member"},
+                }
+            },
+            "another Bitrix24 portal",
+        ),
+    ],
+)
+async def test_validate_installation_rejects_identifier_mismatch(
+    oauth_credentials: None,
+    response_data: dict[str, object],
+    expected_message: str,
+) -> None:
+    """An event is rejected when either application or portal ID differs."""
+    response = MagicMock()
+    response.json.return_value = response_data
+
+    http_client = AsyncMock()
+    http_client.post.return_value = response
+    async_client = create_async_client(http_client)
+
+    with (
+        patch(
+            "app.integrations.bitrix24.oauth.httpx.AsyncClient",
+            return_value=async_client,
+        ),
+        pytest.raises(
+            Bitrix24InstallationValidationError,
+            match=expected_message,
+        ),
+    ):
+        client = Bitrix24OAuthClient()
+        await client.validate_installation(
+            access_token="installation-access-token",
+            member_id="member-123",
+        )
+
+
+@pytest.mark.anyio
+async def test_validate_installation_rejects_empty_access_token(
+    oauth_credentials: None,
+) -> None:
+    """An empty access token is rejected without an HTTP request."""
+    client = Bitrix24OAuthClient()
+
+    with pytest.raises(ValueError, match="Access token must not be empty"):
+        await client.validate_installation("", "member-123")
+
+
+@pytest.mark.anyio
+async def test_validate_installation_rejects_empty_member_id(
+    oauth_credentials: None,
+) -> None:
+    """An empty member ID is rejected without an HTTP request."""
+    client = Bitrix24OAuthClient()
+
+    with pytest.raises(ValueError, match="Member ID must not be empty"):
+        await client.validate_installation("access-token", "")
+
+
+@pytest.mark.anyio
+async def test_validate_installation_raises_structured_oauth_error(
+    oauth_credentials: None,
+) -> None:
+    """A structured error from the authorization server is propagated safely."""
+    response = MagicMock()
+    response.json.return_value = {
+        "error": "invalid_token",
+        "error_description": "Access token is invalid",
+    }
+
+    http_client = AsyncMock()
+    http_client.post.return_value = response
+    async_client = create_async_client(http_client)
+
+    with (
+        patch(
+            "app.integrations.bitrix24.oauth.httpx.AsyncClient",
+            return_value=async_client,
+        ),
+        pytest.raises(Bitrix24OAuthError) as exc_info,
+    ):
+        client = Bitrix24OAuthClient()
+        await client.validate_installation(
+            access_token="installation-access-token",
+            member_id="member-123",
+        )
+
+    assert exc_info.value.error == "invalid_token"
+    assert "installation-access-token" not in str(exc_info.value)
+
+
+@pytest.mark.anyio
+async def test_validate_installation_propagates_http_error(
+    oauth_credentials: None,
+) -> None:
+    """An HTTP error from the authorization server is propagated."""
+    request = httpx.Request("POST", OAUTH_APP_INFO_URL)
+    response = httpx.Response(401, request=request)
+    http_error = httpx.HTTPStatusError(
+        "Unauthorized",
+        request=request,
+        response=response,
+    )
+
+    http_client = AsyncMock()
+    http_client.post.side_effect = http_error
+    async_client = create_async_client(http_client)
+
+    with (
+        patch(
+            "app.integrations.bitrix24.oauth.httpx.AsyncClient",
+            return_value=async_client,
+        ),
+        pytest.raises(httpx.HTTPStatusError),
+    ):
+        client = Bitrix24OAuthClient()
+        await client.validate_installation(
+            access_token="installation-access-token",
+            member_id="member-123",
+        )
 
 
 def test_refresh_token_rejects_empty_token(oauth_credentials: None) -> None:
@@ -66,10 +252,7 @@ async def test_refresh_token_sends_correct_request(
 
     http_client = AsyncMock()
     http_client.get.return_value = response
-
-    async_client = MagicMock()
-    async_client.__aenter__ = AsyncMock(return_value=http_client)
-    async_client.__aexit__ = AsyncMock(return_value=None)
+    async_client = create_async_client(http_client)
 
     with patch(
         "app.integrations.bitrix24.oauth.httpx.AsyncClient",
@@ -113,10 +296,7 @@ async def test_refresh_token_propagates_http_error(
 
     http_client = AsyncMock()
     http_client.get.side_effect = http_error
-
-    async_client = MagicMock()
-    async_client.__aenter__ = AsyncMock(return_value=http_client)
-    async_client.__aexit__ = AsyncMock(return_value=None)
+    async_client = create_async_client(http_client)
 
     with (
         patch(
@@ -140,10 +320,7 @@ async def test_refresh_token_rejects_invalid_response(
 
     http_client = AsyncMock()
     http_client.get.return_value = response
-
-    async_client = MagicMock()
-    async_client.__aenter__ = AsyncMock(return_value=http_client)
-    async_client.__aexit__ = AsyncMock(return_value=None)
+    async_client = create_async_client(http_client)
 
     with (
         patch(
@@ -170,10 +347,7 @@ async def test_refresh_token_raises_structured_oauth_error(
 
     http_client = AsyncMock()
     http_client.get.return_value = response
-
-    async_client = MagicMock()
-    async_client.__aenter__ = AsyncMock(return_value=http_client)
-    async_client.__aexit__ = AsyncMock(return_value=None)
+    async_client = create_async_client(http_client)
 
     with (
         patch(
@@ -188,10 +362,6 @@ async def test_refresh_token_raises_structured_oauth_error(
     assert exc_info.value.error == "invalid_grant"
     assert exc_info.value.description == "Refresh token expired"
     assert "old-refresh-token" not in str(exc_info.value)
-
-    assert "Refresh token expired" not in str(exc_info.value)
-    assert "old-refresh-token" not in str(exc_info.value)
-    assert "invalid_grant" in str(exc_info.value)
 
 
 @pytest.mark.anyio
@@ -208,10 +378,7 @@ async def test_refresh_token_raises_structured_oauth_error_on_success_status(
 
     http_client = AsyncMock()
     http_client.get.return_value = response
-
-    async_client = MagicMock()
-    async_client.__aenter__ = AsyncMock(return_value=http_client)
-    async_client.__aexit__ = AsyncMock(return_value=None)
+    async_client = create_async_client(http_client)
 
     with (
         patch(
