@@ -2,10 +2,16 @@
 
 from typing import Annotated
 
+import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.database.database import get_db
+from app.integrations.bitrix24.events import (
+    Bitrix24EventAPIError,
+    Bitrix24EventClient,
+)
 from app.schemas.events import AppInstallEvent, AppUninstallEvent
 from app.services.event_service import (
     Bitrix24EventService,
@@ -22,7 +28,7 @@ Bitrix24Event = Annotated[
 
 
 @router.post("/events/bitrix24", tags=["events"])
-def handle_bitrix24_event(
+async def handle_bitrix24_event(
     event: Bitrix24Event,
     db: Session = DB_DEPENDENCY,
 ) -> dict[str, str]:
@@ -32,6 +38,21 @@ def handle_bitrix24_event(
     try:
         if isinstance(event, AppInstallEvent):
             service.handle_app_install(event)
+
+            if not settings.bitrix24_event_handler_url:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Bitrix24 event handler URL is not configured.",
+                )
+
+            event_client = Bitrix24EventClient()
+            await event_client.ensure_event_handler(
+                client_endpoint=event.auth.client_endpoint,
+                access_token=event.auth.access_token,
+                event="ONAPPUNINSTALL",
+                handler=settings.bitrix24_event_handler_url,
+            )
+
         elif isinstance(event, AppUninstallEvent):
             service.handle_app_uninstall(event)
 
@@ -42,5 +63,15 @@ def handle_bitrix24_event(
             raise HTTPException(status_code=403, detail="Forbidden") from exc
 
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Bitrix24EventAPIError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to register Bitrix24 event handler.",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to communicate with Bitrix24 REST API.",
+        ) from exc
 
     return {"status": "ok"}
