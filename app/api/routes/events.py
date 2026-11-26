@@ -13,6 +13,7 @@ from app.services.event_service import (
 )
 
 router = APIRouter()
+DB_DEPENDENCY = Depends(get_db)
 
 Bitrix24Event = Annotated[
     AppInstallEvent | AppUninstallEvent,

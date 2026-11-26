@@ -9,4 +9,3 @@ from app.core.config import settings
 app = FastAPI(title=settings.app_name, debug=settings.debug)
 app.include_router(health_router)
 app.include_router(events_router)
-DB_DEPENDENCY = Depends(get_db)
