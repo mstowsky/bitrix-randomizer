@@ -54,3 +54,20 @@ def test_installation_status(client, monkeypatch, portal, expected_ready):
     assert response.status_code == 200
     assert response.json() == {"ready": expected_ready}
     service.get_by_member_id.assert_called_once_with("test-member-id")
+
+
+def test_install_page_accepts_post(client):
+    """Return the installation page when Bitrix24 sends a POST request."""
+    response = client.post(
+        "/install",
+        params={
+            "DOMAIN": "test.bitrix24.ru",
+            "PROTOCOL": "1",
+            "LANG": "ru",
+            "APP_SID": "test-app-sid",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Рандомайзер данных" in response.text

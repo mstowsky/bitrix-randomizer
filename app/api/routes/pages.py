@@ -19,7 +19,7 @@ TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "static" / "templates"
 
 @router.api_route(
     "/install",
-    methods=["GET", "HEAD"],
+    methods=["GET", "HEAD", "POST"],
     include_in_schema=False,
 )
 async def install_page() -> FileResponse:
