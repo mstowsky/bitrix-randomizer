@@ -63,6 +63,8 @@ class PortalService:
             "application_token_encrypted": (
                 encrypt_token(application_token) if application_token else None
             ),
+            "is_active": True,
+            "revoked_at": None,
         }
 
         try:
@@ -93,6 +95,9 @@ class PortalService:
         if portal is None:
             raise ValueError("Portal not found.")
 
+        if not portal.is_active:
+            raise PortalReauthorizationRequired
+
         if not portal.access_token_encrypted:
             raise ValueError("Portal has no stored access token.")
 
@@ -117,7 +122,11 @@ class PortalService:
         if portal is None:
             raise ValueError("Portal not found.")
 
+        if not portal.is_active:
+            raise PortalReauthorizationRequired
+
         if not portal.refresh_token_encrypted:
+            self._mark_portal_inactive(portal)
             raise PortalReauthorizationRequired
 
         # Decrypt the current refresh token before sending it to Bitrix24.
@@ -129,6 +138,7 @@ class PortalService:
             token_data = await oauth_client.refresh_token(refresh_token)
         except Bitrix24OAuthError as exc:
             if exc.error == "invalid_grant":
+                self._mark_portal_inactive(portal)
                 raise PortalReauthorizationRequired from exc
             raise
 
@@ -151,6 +161,21 @@ class PortalService:
             )
             self.db.commit()
             return portal
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def _mark_portal_inactive(self, portal: Portal) -> None:
+        """Deactivate a portal when its OAuth credentials are no longer valid."""
+        try:
+            self.repository.update(
+                portal,
+                access_token_encrypted=None,
+                refresh_token_encrypted=None,
+                is_active=False,
+                revoked_at=datetime.now(UTC),
+            )
+            self.db.commit()
         except Exception:
             self.db.rollback()
             raise
