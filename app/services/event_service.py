@@ -49,6 +49,10 @@ class Bitrix24EventService:
             application_token=auth.application_token,
         )
 
+    def mark_installation_ready(self, portal: Portal) -> None:
+        """Mark installation as ready after all setup operations succeed."""
+        self.portal_service.mark_installation_ready(portal)
+
     def handle_app_uninstall(self, event: AppUninstallEvent) -> Portal:
         """Verify and process application uninstallation."""
         auth = event.auth

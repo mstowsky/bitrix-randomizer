@@ -64,6 +64,7 @@ class PortalService:
                 encrypt_token(application_token) if application_token else None
             ),
             "is_active": True,
+            "installation_ready": False,
             "revoked_at": None,
         }
 
@@ -87,6 +88,15 @@ class PortalService:
     def get_by_member_id(self, member_id: str) -> Portal | None:
         """Get a portal by its Bitrix24 member identifier."""
         return self.repository.get_by_member_id(member_id)
+
+    def mark_installation_ready(self, portal: Portal) -> None:
+        """Mark the initial application installation as completed."""
+        try:
+            self.repository.update(portal, installation_ready=True)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
 
     async def get_valid_access_token(self, portal_id: UUID) -> str:
         """Return a valid access token, refreshing it when it is close to expiration."""

@@ -37,7 +37,7 @@ async def handle_bitrix24_event(
 
     try:
         if isinstance(event, AppInstallEvent):
-            service.handle_app_install(event)
+            portal = service.handle_app_install(event)
 
             if not settings.bitrix24_event_handler_url:
                 raise HTTPException(
@@ -52,6 +52,8 @@ async def handle_bitrix24_event(
                 event="ONAPPUNINSTALL",
                 handler=settings.bitrix24_event_handler_url,
             )
+
+            service.mark_installation_ready(portal)
 
         elif isinstance(event, AppUninstallEvent):
             service.handle_app_uninstall(event)
