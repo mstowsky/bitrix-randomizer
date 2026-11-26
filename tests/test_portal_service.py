@@ -610,3 +610,97 @@ async def test_refresh_portal_tokens_rolls_back_on_database_error(
     repository.update.assert_called_once()
     db.commit.assert_not_called()
     db.rollback.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_refresh_portal_tokens_rejects_inactive_portal(
+    service: PortalService,
+    db: MagicMock,
+    repository: MagicMock,
+) -> None:
+    """An inactive portal cannot refresh its tokens."""
+    portal = Portal(
+        domain="example.bitrix24.ru",
+        member_id="member-123",
+        refresh_token_encrypted="encrypted:old-refresh",
+        is_active=False,
+    )
+    repository.get_by_id.return_value = portal
+
+    with (
+        patch(
+            "app.services.portal_service.Bitrix24OAuthClient",
+        ) as oauth_client,
+        pytest.raises(PortalReauthorizationRequired),
+    ):
+        await service.refresh_portal_tokens(uuid4())
+
+    oauth_client.assert_not_called()
+    repository.update.assert_not_called()
+    db.commit.assert_not_called()
+    db.rollback.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_get_valid_access_token_rejects_inactive_portal(
+    service: PortalService,
+    repository: MagicMock,
+) -> None:
+    """An inactive portal cannot provide an access token."""
+    portal = Portal(
+        domain="example.bitrix24.ru",
+        member_id="member-123",
+        access_token_encrypted="encrypted:old-access",
+        access_token_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        is_active=False,
+    )
+    repository.get_by_id.return_value = portal
+
+    with (
+        patch(
+            "app.services.portal_service.decrypt_token",
+        ) as decrypt,
+        patch.object(
+            service,
+            "refresh_portal_tokens",
+            new_callable=AsyncMock,
+        ) as refresh,
+        pytest.raises(PortalReauthorizationRequired),
+    ):
+        await service.get_valid_access_token(uuid4())
+
+    decrypt.assert_not_called()
+    refresh.assert_not_awaited()
+
+
+@pytest.mark.parametrize("failure_point", ["update", "commit"])
+def test_mark_portal_inactive_rolls_back_on_database_error(
+    service: PortalService,
+    db: MagicMock,
+    repository: MagicMock,
+    failure_point: str,
+) -> None:
+    """Deactivation rolls back when updating or committing fails."""
+    portal = Portal(
+        domain="example.bitrix24.ru",
+        member_id="member-123",
+        access_token_encrypted="encrypted:access",
+        refresh_token_encrypted="encrypted:refresh",
+        is_active=True,
+    )
+
+    if failure_point == "update":
+        repository.update.side_effect = RuntimeError("Database error")
+    else:
+        db.commit.side_effect = RuntimeError("Database error")
+
+    with pytest.raises(RuntimeError, match="Database error"):
+        service._mark_portal_inactive(portal)
+
+    repository.update.assert_called_once()
+    db.rollback.assert_called_once()
+
+    if failure_point == "update":
+        db.commit.assert_not_called()
+    else:
+        db.commit.assert_called_once()
