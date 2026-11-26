@@ -85,6 +85,14 @@ class Portal(Base):
         nullable=False,
     )
 
+    # Whether the initial Bitrix24 installation has been completed.
+    installation_ready: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+    )
+
     # Timestamp when the portal connection was revoked.
     revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
