@@ -6,6 +6,7 @@ httpx2
 psycopg[binary]
 pydantic-settings
 pytest
+pytest-asyncio
 pytest-cov
 ruff
 sqlalchemy
