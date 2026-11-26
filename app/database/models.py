@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text, Uuid, func
+from sqlalchemy import Boolean, DateTime, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -74,6 +74,20 @@ class Portal(Base):
     # Encrypted application token for event verification.
     application_token_encrypted: Mapped[str | None] = mapped_column(
         Text,
+        nullable=True,
+    )
+
+    # Whether the portal connection is active.
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default="true",
+        nullable=False,
+    )
+
+    # Timestamp when the portal connection was revoked.
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
         nullable=True,
     )
 
