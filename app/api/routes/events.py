@@ -23,7 +23,7 @@ Bitrix24Event = Annotated[
 @router.post("/events/bitrix24", tags=["events"])
 def handle_bitrix24_event(
     event: Bitrix24Event,
-    db: Session = Depends(get_db),
+    db: Session = DB_DEPENDENCY,
 ) -> dict[str, str]:
     """Process incoming Bitrix24 application lifecycle events."""
     service = Bitrix24EventService(db)
