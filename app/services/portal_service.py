@@ -179,3 +179,7 @@ class PortalService:
         except Exception:
             self.db.rollback()
             raise
+
+    def deactivate_portal(self, portal: Portal) -> None:
+        """Deactivate a portal after application uninstallation."""
+        self._mark_portal_inactive(portal)

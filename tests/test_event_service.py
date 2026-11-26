@@ -5,8 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.schemas.events import AppInstallEvent
-from app.services.event_service import Bitrix24EventService
+from app.core.security import encrypt_token
+from app.schemas.events import AppInstallEvent, AppUninstallEvent
+from app.services.event_service import Bitrix24EventService, InvalidApplicationToken
 
 
 @pytest.fixture
@@ -28,6 +29,28 @@ def install_event() -> AppInstallEvent:
                 "refresh_token": "refresh-token",
                 "expires_in": "3600",
                 "scope": "crm,user",
+                "server_endpoint": "https://oauth.bitrix24.tech/rest/",
+                "client_endpoint": "https://example.bitrix24.ru/rest/",
+                "member_id": "member-123",
+                "application_token": "application-token",
+            },
+        }
+    )
+
+
+@pytest.fixture
+def uninstall_event() -> AppUninstallEvent:
+    """Provide a valid ONAPPUNINSTALL event."""
+    return AppUninstallEvent.model_validate(
+        {
+            "event": "ONAPPUNINSTALL",
+            "ts": "1696527000",
+            "data": {
+                "LANGUAGE_ID": "ru",
+                "CLEAN": "1",
+            },
+            "auth": {
+                "domain": "example.bitrix24.ru",
                 "server_endpoint": "https://oauth.bitrix24.tech/rest/",
                 "client_endpoint": "https://example.bitrix24.ru/rest/",
                 "member_id": "member-123",
@@ -97,3 +120,67 @@ def test_handle_app_install_rejects_invalid_credentials(
         event_service.handle_app_install(install_event)
 
     event_service.portal_service.save_portal.assert_not_called()
+
+
+@pytest.mark.parametrize("clean", [0, 1])
+def test_handle_app_uninstall_deactivates_portal(
+    event_service: Bitrix24EventService,
+    uninstall_event: AppUninstallEvent,
+    clean: int,
+) -> None:
+    """A valid uninstall event deactivates the portal without deleting data."""
+    uninstall_event.data.clean = clean
+
+    portal = MagicMock()
+    portal.application_token_encrypted = encrypt_token("application-token")
+    event_service.portal_service.get_by_member_id.return_value = portal
+
+    result = event_service.handle_app_uninstall(uninstall_event)
+
+    assert result is portal
+    event_service.portal_service.get_by_member_id.assert_called_once_with("member-123")
+    event_service.portal_service.deactivate_portal.assert_called_once_with(portal)
+    event_service.portal_service.delete.assert_not_called()
+
+
+def test_handle_app_uninstall_rejects_invalid_token(
+    event_service: Bitrix24EventService,
+    uninstall_event: AppUninstallEvent,
+) -> None:
+    """An uninstall event with an invalid application token is rejected."""
+    portal = MagicMock()
+    portal.application_token_encrypted = encrypt_token("stored-token")
+    event_service.portal_service.get_by_member_id.return_value = portal
+
+    with pytest.raises(InvalidApplicationToken):
+        event_service.handle_app_uninstall(uninstall_event)
+
+    event_service.portal_service.deactivate_portal.assert_not_called()
+
+
+def test_handle_app_uninstall_rejects_unknown_portal(
+    event_service: Bitrix24EventService,
+    uninstall_event: AppUninstallEvent,
+) -> None:
+    """An uninstall event for an unknown portal is rejected."""
+    event_service.portal_service.get_by_member_id.return_value = None
+
+    with pytest.raises(ValueError, match="Portal not found"):
+        event_service.handle_app_uninstall(uninstall_event)
+
+    event_service.portal_service.deactivate_portal.assert_not_called()
+
+
+def test_handle_app_uninstall_rejects_missing_stored_token(
+    event_service: Bitrix24EventService,
+    uninstall_event: AppUninstallEvent,
+) -> None:
+    """An uninstall event is rejected when no token is stored."""
+    portal = MagicMock()
+    portal.application_token_encrypted = None
+    event_service.portal_service.get_by_member_id.return_value = portal
+
+    with pytest.raises(InvalidApplicationToken):
+        event_service.handle_app_uninstall(uninstall_event)
+
+    event_service.portal_service.deactivate_portal.assert_not_called()
