@@ -69,6 +69,8 @@ def test_save_portal_creates_new_portal(
     assert portal.access_token_encrypted == "encrypted:access-123"
     assert portal.refresh_token_encrypted == "encrypted:refresh-123"
     assert portal.application_token_encrypted == "encrypted:application-123"
+    assert portal.is_active is True
+    assert portal.revoked_at is None
 
     repository.create.assert_called_once_with(portal)
     db.commit.assert_called_once()
@@ -83,6 +85,7 @@ def test_save_portal_updates_existing_portal(
     portal = Portal(
         domain="example.bitrix24.ru",
         member_id="member-123",
+        is_active=True,
     )
     repository.get_by_member_id.return_value = portal
     repository.get_by_domain.return_value = portal
@@ -108,8 +111,9 @@ def test_save_portal_updates_existing_portal(
     assert updated_portal is portal
     assert updated_values["access_token_encrypted"] == "encrypted:new-access"
     assert updated_values["refresh_token_encrypted"] == "encrypted:new-refresh"
+    assert updated_values["is_active"] is True
+    assert updated_values["revoked_at"] is None
 
-    repository.update.assert_called_once()
     repository.create.assert_not_called()
     db.commit.assert_called_once()
 
@@ -123,6 +127,7 @@ def test_save_portal_rejects_domain_owned_by_another_portal(
     existing_portal = Portal(
         domain="example.bitrix24.ru",
         member_id="another-member",
+        is_active=True,
     )
     repository.get_by_member_id.return_value = None
     repository.get_by_domain.return_value = existing_portal
@@ -152,6 +157,7 @@ async def test_refresh_portal_tokens_saves_new_tokens(
         domain="example.bitrix24.ru",
         member_id="member-123",
         refresh_token_encrypted="encrypted:old-refresh",
+        is_active=True,
     )
     repository.get_by_id.return_value = portal
 
@@ -225,17 +231,29 @@ async def test_refresh_portal_tokens_rejects_missing_refresh_token(
     db: MagicMock,
     repository: MagicMock,
 ) -> None:
-    """Refreshing tokens without a stored refresh token is rejected."""
+    """Refreshing tokens without a stored refresh token deactivates the portal."""
     portal = Portal(
         domain="example.bitrix24.ru",
         member_id="member-123",
+        is_active=True,
     )
     repository.get_by_id.return_value = portal
 
     with pytest.raises(PortalReauthorizationRequired):
         await service.refresh_portal_tokens(uuid4())
 
-    db.commit.assert_not_called()
+    repository.update.assert_called_once_with(
+        portal,
+        access_token_encrypted=None,
+        refresh_token_encrypted=None,
+        is_active=False,
+        revoked_at=repository.update.call_args.kwargs["revoked_at"],
+    )
+    updated_values = repository.update.call_args.kwargs
+    assert updated_values["revoked_at"] is not None
+
+    db.commit.assert_called_once()
+    db.rollback.assert_not_called()
 
 
 @pytest.mark.anyio
@@ -249,6 +267,7 @@ async def test_refresh_portal_tokens_rejects_different_member_id(
         domain="example.bitrix24.ru",
         member_id="member-123",
         refresh_token_encrypted="encrypted:old-refresh",
+        is_active=True,
     )
     repository.get_by_id.return_value = portal
 
@@ -293,6 +312,7 @@ async def test_get_valid_access_token_returns_existing_token(
         member_id="member-123",
         access_token_encrypted="encrypted:access-123",
         access_token_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        is_active=True,
     )
     repository.get_by_id.return_value = portal
 
@@ -334,6 +354,7 @@ async def test_get_valid_access_token_refreshes_expiring_token(
         member_id="member-123",
         access_token_encrypted="encrypted:old-access",
         access_token_expires_at=expires_at,
+        is_active=True,
     )
     repository.get_by_id.return_value = portal
 
@@ -368,6 +389,7 @@ async def test_get_valid_access_token_refreshes_when_expiration_is_unknown(
         member_id="member-123",
         access_token_encrypted="encrypted:old-access",
         access_token_expires_at=None,
+        is_active=True,
     )
     repository.get_by_id.return_value = portal
 
@@ -412,6 +434,7 @@ async def test_get_valid_access_token_rejects_missing_access_token(
         domain="example.bitrix24.ru",
         member_id="member-123",
         access_token_encrypted=None,
+        is_active=True,
     )
     repository.get_by_id.return_value = portal
 
@@ -425,11 +448,12 @@ async def test_refresh_portal_tokens_requires_reauthorization(
     db: MagicMock,
     repository: MagicMock,
 ) -> None:
-    """An invalid refresh token requires portal reauthorization."""
+    """An invalid refresh token deactivates the portal and requires reauthorization."""
     portal = Portal(
         domain="example.bitrix24.ru",
         member_id="member-123",
         refresh_token_encrypted="encrypted:old-refresh",
+        is_active=True,
     )
     repository.get_by_id.return_value = portal
 
@@ -455,8 +479,15 @@ async def test_refresh_portal_tokens_requires_reauthorization(
         await service.refresh_portal_tokens(uuid4())
 
     oauth_client.refresh_token.assert_awaited_once_with("old-refresh")
-    repository.update.assert_not_called()
-    db.commit.assert_not_called()
+    repository.update.assert_called_once()
+
+    updated_values = repository.update.call_args.kwargs
+    assert updated_values["access_token_encrypted"] is None
+    assert updated_values["refresh_token_encrypted"] is None
+    assert updated_values["is_active"] is False
+    assert updated_values["revoked_at"] is not None
+
+    db.commit.assert_called_once()
     db.rollback.assert_not_called()
 
 
@@ -470,6 +501,7 @@ async def test_refresh_portal_tokens_propagates_other_oauth_errors(
         domain="example.bitrix24.ru",
         member_id="member-123",
         refresh_token_encrypted="encrypted:old-refresh",
+        is_active=True,
     )
     repository.get_by_id.return_value = portal
 
@@ -511,6 +543,7 @@ async def test_get_valid_access_token_requires_reauthorization(
         member_id="member-123",
         access_token_encrypted="encrypted:old-access",
         access_token_expires_at=datetime.now(UTC) - timedelta(minutes=1),
+        is_active=True,
     )
     repository.get_by_id.return_value = portal
 
@@ -539,6 +572,7 @@ async def test_refresh_portal_tokens_rolls_back_on_database_error(
         domain="example.bitrix24.ru",
         member_id="member-123",
         refresh_token_encrypted="encrypted:old-refresh",
+        is_active=True,
     )
     repository.get_by_id.return_value = portal
     repository.update.side_effect = RuntimeError("Database error")
