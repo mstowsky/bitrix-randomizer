@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     client_id: str = ""
     client_secret: str = ""
 
+    bitrix24_event_handler_url: str = ""
+
     encryption_key: str
 
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/bitrix_randomizer"
