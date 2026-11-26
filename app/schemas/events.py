@@ -29,8 +29,6 @@ class AppInstallData(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     version: str = Field(alias="VERSION")
-    active: Literal["Y"] = Field(alias="ACTIVE")
-    installed: Literal["Y"] = Field(alias="INSTALLED")
     language_id: str = Field(alias="LANGUAGE_ID")
 
 

@@ -19,8 +19,6 @@ def install_event() -> AppInstallEvent:
             "ts": "1696527000",
             "data": {
                 "VERSION": "1",
-                "ACTIVE": "Y",
-                "INSTALLED": "Y",
                 "LANGUAGE_ID": "ru",
             },
             "auth": {
