@@ -6,20 +6,17 @@
 document.addEventListener("DOMContentLoaded", function () {
     const statusElement = document.getElementById("installation-status");
 
-    // Stop initialization if the status element is missing.
     if (!statusElement) {
         console.error("Installation status element was not found.");
         return;
     }
 
-    // Check that the Bitrix24 SDK is available.
     if (typeof BX24 === "undefined" || !BX24) {
         statusElement.textContent =
             "Не удалось загрузить библиотеку Bitrix24. Обновите страницу.";
         return;
     }
 
-    // Prevent multiple installation completion attempts.
     let installationFinished = false;
 
     // Build the absolute URL of the application event handler.
@@ -39,7 +36,6 @@ document.addEventListener("DOMContentLoaded", function () {
     function callBitrixMethod(method, params) {
         return new Promise(function (resolve, reject) {
             BX24.callMethod(method, params, function (result) {
-                // Reject the promise if Bitrix24 returned an API error.
                 if (result.error()) {
                     reject(
                         new Error(
@@ -56,10 +52,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Register an event handler only if it does not exist yet.
     async function ensureEventHandler(eventName, handlerUrl) {
-        // Retrieve handlers already registered by this application.
         const handlers = await callBitrixMethod("event.get", {});
 
-        // Check whether the required event and URL are already registered.
         const alreadyRegistered = handlers.some(function (handler) {
             return (
                 handler.event === eventName &&
@@ -71,7 +65,6 @@ document.addEventListener("DOMContentLoaded", function () {
             return;
         }
 
-        // Register the missing event handler.
         const registered = await callBitrixMethod("event.bind", {
             event: eventName,
             handler: handlerUrl,
@@ -84,21 +77,17 @@ document.addEventListener("DOMContentLoaded", function () {
         }
     }
 
-    // Initialize the SDK and perform the installation sequence.
-    BX24.init(async function () {
+    // Handle the first application launch and complete installation.
+    BX24.install(async function () {
         try {
             statusElement.textContent =
                 "Регистрация обработчиков событий Bitrix24...";
 
             const handlerUrl = getEventHandlerUrl();
 
-            // Register the installation event handler first.
             await ensureEventHandler("ONAPPINSTALL", handlerUrl);
-
-            // Register the application removal event handler.
             await ensureEventHandler("ONAPPUNINSTALL", handlerUrl);
 
-            // Do not finish installation more than once.
             if (installationFinished) {
                 return;
             }
@@ -108,7 +97,6 @@ document.addEventListener("DOMContentLoaded", function () {
             statusElement.textContent =
                 "Обработчики зарегистрированы. Завершение установки...";
 
-            // Notify Bitrix24 that the installation wizard has completed.
             BX24.installFinish();
         } catch (error) {
             console.error("Application installation failed.", error);
