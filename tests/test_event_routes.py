@@ -322,3 +322,68 @@ def test_install_event_bitrix_api_error_returns_502(
     assert response.json()["detail"] == ("Failed to register Bitrix24 event handler.")
     service.handle_app_install.assert_called_once()
     service.mark_installation_ready.assert_not_called()
+
+
+def test_install_event_form_data_returns_200(
+    client,
+    installation_mocks,
+):
+    """A URL-encoded installation event is parsed and processed."""
+    service, oauth_validate, ensure_handler = installation_mocks
+    portal = Mock()
+    service.handle_app_install.return_value = portal
+
+    payload = make_install_payload()
+    form_data = {
+        "event": payload["event"],
+        "ts": str(payload["ts"]),
+    }
+
+    for group in ("data", "auth"):
+        for key, value in payload[group].items():
+            form_data[f"{group}[{key}]"] = str(value)
+
+    response = client.post(
+        "/events/bitrix24",
+        data=form_data,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+    oauth_validate.assert_awaited_once_with(
+        access_token="test-access-token",
+        member_id="test-member-id",
+    )
+    service.handle_app_install.assert_called_once()
+    ensure_handler.assert_awaited_once()
+    service.mark_installation_ready.assert_called_once_with(portal)
+
+
+def test_uninstall_event_form_data_returns_200(client, monkeypatch):
+    """A URL-encoded uninstall event is parsed and processed."""
+    service = Mock()
+
+    monkeypatch.setattr(
+        "app.api.routes.events.Bitrix24EventService",
+        lambda db: service,
+    )
+
+    payload = make_uninstall_payload()
+    form_data = {
+        "event": payload["event"],
+        "ts": str(payload["ts"]),
+    }
+
+    for group in ("data", "auth"):
+        for key, value in payload[group].items():
+            form_data[f"{group}[{key}]"] = str(value)
+
+    response = client.post(
+        "/events/bitrix24",
+        data=form_data,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    service.handle_app_uninstall.assert_called_once()
