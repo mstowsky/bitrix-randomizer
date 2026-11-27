@@ -29,7 +29,7 @@ async def install_page() -> FileResponse:
 
 @router.api_route(
     "/app",
-    methods=["GET", "HEAD"],
+    methods=["GET", "HEAD", "POST"],
     include_in_schema=False,
 )
 async def app_page() -> FileResponse:
